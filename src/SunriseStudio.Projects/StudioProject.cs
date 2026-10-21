@@ -9,7 +9,7 @@ public sealed partial class StudioProject
 {
     public const string ProjectFileName = "sunrise.project.json";
     // The newest manifest version this build reads and writes.
-    public const int ManifestVersion = 7;
+    public const int ManifestVersion = 8;
     private const int MaximumManifestBytes = 16 * 1024 * 1024;
     private ProjectManifest manifest;
     public string DirectoryPath { get; }
@@ -89,6 +89,12 @@ public sealed partial class StudioProject
         if (data.AddedAssets.Where(x => x.Native is not null)
             .GroupBy(x => (x.Native!.PackageId, x.Native.EntryIndex)).Any(x => x.Count() > 1))
             throw new InvalidDataException("Project contains duplicate native entry indices.");
+        if (data.AddedAssets.Any(asset => asset.Ground is not null))
+        {
+            if (data.Version < 8) throw new InvalidDataException("Grounds require project manifest version 8.");
+            if (data.AddedAssets.Any(asset => asset.Ground is { } ground && !ValidGround(ground)))
+                throw new InvalidDataException("Invalid ground id.");
+        }
         bool aliases = data.AddedAssets.Any(asset => asset.Native?.WideHashes is { Count: > 0 });
         if (aliases && data.Version < 3)
             throw new InvalidDataException("Authored wide hashes require project manifest version 3.");
@@ -309,7 +315,8 @@ public sealed partial class StudioProject
         bool names = value.ObjectNames is { Count: > 0 };
         bool groups = value.ObjectGroups is { Count: > 0 };
         bool parts = groups && value.ObjectGroups!.Any(group => group.CollisionParts is not null);
-        int version = parts ? 7 : groups ? 6 : names ? 5 : bindings ? 4 : aliases ? 3 : objects ? 2 : 1;
+        bool grounds = assets.Any(asset => asset.Ground is not null);
+        int version = grounds ? 8 : parts ? 7 : groups ? 6 : names ? 5 : bindings ? 4 : aliases ? 3 : objects ? 2 : 1;
         if (value.Version == version && ReferenceEquals(assets, value.AddedAssets)
             && (objects || value.ObjectEdits is null) && (bindings || value.ConfigBindings is null)
             && (names || value.ObjectNames is null) && (groups || value.ObjectGroups is null)) return value;
@@ -318,6 +325,10 @@ public sealed partial class StudioProject
             ConfigBindings = bindings ? value.ConfigBindings : null, ObjectNames = names ? value.ObjectNames : null,
             ObjectGroups = groups ? value.ObjectGroups : null };
     }
+
+    /** Ground ids are 1 to 64 lowercase letters, digits or dashes. */
+    public static bool ValidGround(string id) =>
+        id.Length is >= 1 and <= 64 && id.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
 
     private static byte[] SerializeManifest(ProjectManifest value)
     {
