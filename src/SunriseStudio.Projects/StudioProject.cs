@@ -9,7 +9,7 @@ public sealed partial class StudioProject
 {
     public const string ProjectFileName = "sunrise.project.json";
     // The newest manifest version this build reads and writes.
-    public const int ManifestVersion = 7;
+    public const int ManifestVersion = 8;
     private const int MaximumManifestBytes = 16 * 1024 * 1024;
     private ProjectManifest manifest;
     public string DirectoryPath { get; }
@@ -116,6 +116,12 @@ public sealed partial class StudioProject
                 throw new InvalidDataException("Project has two groups with one id.");
             RequireOneGroupEach(groups);
         }
+        if (data.BubbleConnections is { Count: > 0 } connections)
+        {
+            if (data.Version < 8) throw new InvalidDataException("Bubble connections require project manifest version 8.");
+            RequireBubbleConnections(connections);
+        }
+        data = data with { BubbleConnections = data.BubbleConnections is { Count: > 0 } kept ? Array.AsReadOnly(kept.ToArray()) : null };
         data = data with { ObjectGroups = data.ObjectGroups is { Count: > 0 } saved
             ? Array.AsReadOnly(saved.Select(Frozen).ToArray()) : null };
         data = data with { Mod = FreezeConfigDeclarations(data.Mod) };
@@ -309,14 +315,16 @@ public sealed partial class StudioProject
         bool names = value.ObjectNames is { Count: > 0 };
         bool groups = value.ObjectGroups is { Count: > 0 };
         bool parts = groups && value.ObjectGroups!.Any(group => group.CollisionParts is not null);
-        int version = parts ? 7 : groups ? 6 : names ? 5 : bindings ? 4 : aliases ? 3 : objects ? 2 : 1;
+        bool connections = value.BubbleConnections is { Count: > 0 };
+        int version = connections ? 8 : parts ? 7 : groups ? 6 : names ? 5 : bindings ? 4 : aliases ? 3 : objects ? 2 : 1;
         if (value.Version == version && ReferenceEquals(assets, value.AddedAssets)
             && (objects || value.ObjectEdits is null) && (bindings || value.ConfigBindings is null)
-            && (names || value.ObjectNames is null) && (groups || value.ObjectGroups is null)) return value;
+            && (names || value.ObjectNames is null) && (groups || value.ObjectGroups is null)
+            && (connections || value.BubbleConnections is null)) return value;
         return value with { Version = version, AddedAssets = assets,
             ObjectEdits = objects ? value.ObjectEdits : null,
             ConfigBindings = bindings ? value.ConfigBindings : null, ObjectNames = names ? value.ObjectNames : null,
-            ObjectGroups = groups ? value.ObjectGroups : null };
+            ObjectGroups = groups ? value.ObjectGroups : null, BubbleConnections = connections ? value.BubbleConnections : null };
     }
 
     private static byte[] SerializeManifest(ProjectManifest value)
